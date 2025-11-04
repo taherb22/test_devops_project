@@ -28,7 +28,12 @@ app.get('/metrics', async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`listening on ${port}`);
-});
+// Export app for testing; start server only when run directly
+if (require.main === module) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`listening on ${port}`);
+  });
+}
+
+module.exports = app;
