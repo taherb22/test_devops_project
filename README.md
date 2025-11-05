@@ -9,9 +9,7 @@ Minimal Node.js (Express) service with Prometheus metrics, containerized with Do
 - Orchestration: Kubernetes (Deployment + Service)
 - IaC: Terraform (AWS S3 example)
 
-## Repository URL
-- Replace with your repo URL:
-  - https://github.com/<your-username>/test_devops_project
+
 
 ## Project structure
 - `index.js` — Express app with `/`, `/health`, `/metrics` (exports app for tests)
@@ -85,13 +83,78 @@ Jobs:
 - Uses `kubectl` and your kubeconfig to set Deployment image to the SHA tag
 - Waits for rollout to complete
 
-Required repo settings:
-- Secrets:
-  - `DOCKERHUB_USERNAME` — Docker Hub username
-  - `DOCKERHUB_TOKEN` — Docker Hub access token (Docker Hub → Account Settings → Security)
-  - `KUBE_CONFIG` — kubeconfig content (paste YAML content)
-- Variables (optional):
-  - `K8S_NAMESPACE` — target namespace (defaults to `default`)
+Required configuration (secrets & variables)
+
+This project requires a few repository Secrets and an optional repository Variable so CI can push images and deploy to your Kubernetes cluster.
+
+1) Create a Docker Hub repository
+- On Docker Hub, create a repository named `simple-node-app` under your account or org.
+
+2) Generate a Docker Hub access token
+- Docker Hub → Account Settings → Security → New Access Token
+- Save the token; you'll add it to GitHub as `DOCKERHUB_TOKEN`.
+
+3) Create GitHub repository secrets (UI)
+- Go to GitHub: Settings → Security → Secrets and variables → Actions → New repository secret
+- Add these three secrets:
+  - `DOCKERHUB_USERNAME` — your Docker Hub username
+  - `DOCKERHUB_TOKEN` — Docker Hub access token (from step 2)
+  - `KUBE_CONFIG` — the contents of a kubeconfig file (see step 4)
+
+4) Create a CI-friendly kubeconfig (recommended)
+If your kubeconfig references external certificate/key files, flatten it so CI runners can use it directly.
+
+From a machine with `kubectl` configured for the target cluster and the desired context:
+
+```powershell
+# (optional) set the context namespace
+kubectl config set-context --current --namespace my-namespace
+
+# produce a minimal, flattened kubeconfig suitable for CI
+kubectl config view --minify --flatten > kubeconfig_ci.yaml
+
+# inspect and copy the file contents, then paste into the KUBE_CONFIG secret
+type kubeconfig_ci.yaml
+```
+
+Notes:
+- The flattened kubeconfig embeds certs/tokens inline and contains only the current context.
+- Use least-privilege credentials: create a Kubernetes `ServiceAccount` (e.g., `ci-deployer`) scoped to the target namespace with a Role/RoleBinding that permits `patch`/`update` on Deployments and `get` on rollouts.
+
+5) (Optional) Add repository variable for namespace
+- Go to Settings → Security → Secrets and variables → Actions → Variables → New repository variable
+- Name: `K8S_NAMESPACE`, Value: the target namespace (e.g., `default` or `staging`). The workflow defaults to `default` if this is not set.
+
+6) Alternative: add secrets using GitHub CLI (PowerShell)
+```powershell
+gh auth login
+gh secret set DOCKERHUB_USERNAME --body "your-dockerhub-username"
+gh secret set DOCKERHUB_TOKEN --body "your-dockerhub-access-token"
+gh secret set KUBE_CONFIG < .\kubeconfig_ci.yaml
+gh variable set K8S_NAMESPACE --body "default"
+```
+
+7) One-time Kubernetes bootstrap
+- Apply the base manifests once so the Deployment and Service exist before CI runs `kubectl set image`:
+```powershell
+kubectl apply -f k8s/
+```
+
+8) Private Docker Hub repositories
+- If the Docker Hub repo is private, create an `imagePullSecret` in Kubernetes and attach it to the ServiceAccount used by the Deployment or directly to the Pod spec. Example:
+
+```bash
+# create secret (example)
+kubectl create secret docker-registry regcred --docker-server=https://index.docker.io/v1/ \
+  --docker-username=$DOCKERHUB_USERNAME --docker-password=$DOCKERHUB_TOKEN --docker-email=you@example.com -n $K8S_NAMESPACE
+
+# reference it in the ServiceAccount or Pod spec
+```
+
+Common pitfalls
+- Secrets not set: CI will fail when attempting to login to Docker Hub or configure kubeconfig.
+- Kubeconfig uses external file paths: flatten with `kubectl config view --minify --flatten`.
+- Cluster not reachable from GitHub runners: consider a self-hosted runner with network access.
 
 
 ## Kubernetes
