@@ -89,3 +89,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  deploy:
+    name: Deploy to Kubernetes
+    needs: [build-and-push]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    env:
+      K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        shell: bash
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBE_CONFIG" > ~/.kube/config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Update Deployment image to SHA tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/simple-node-app:${{ github.sha }}"
+          echo "Setting image to $IMAGE in namespace $K8S_NAMESPACE"
+          kubectl -n "$K8S_NAMESPACE" set image deployment/simple-node-app app="$IMAGE" --record
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n "$K8S_NAMESPACE" rollout status deploy/simple-node-app --timeout=180s
+
