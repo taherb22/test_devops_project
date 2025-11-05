@@ -1,123 +1,179 @@
-# simple-node-app — Containerized sample
+# simple-node-app
 
-This repository contains a minimal Node.js Express app instrumented with prom-client and provided with containerization, CI, k8s manifests, Terraform IaC, and a basic monitoring plan.
+Minimal Node.js (Express) service with Prometheus metrics, containerized with Docker, deployable to Kubernetes, CI/CD via GitHub Actions, and sample Terraform IaC.
 
-Files added
-- `index.js` — Minimal app with `/`, `/health`, and `/metrics`.
-- `package.json` — dependencies and scripts (eslint).
-- `Dockerfile` — multi-stage Dockerfile.
-- `docker-compose.yml` — local compose for development.
-- `k8s/` — `deployment.yaml`, `service.yaml` (image placeholder: `simple-node-app:latest`).
-- `.github/workflows/ci.yml` — builds and lints on push.
-- `terraform/` — simple AWS S3 bucket IaC (`main.tf`, `variables.tf`).
-- `prometheus/prometheus.yml` — local Prometheus scrape config.
+- Language: Node.js (Express)
+- Metrics: Prometheus (`/metrics` via prom-client)
+- CI: GitHub Actions (lint, test matrix, build+push, auto-deploy)
+- Registry: Docker Hub
+- Orchestration: Kubernetes (Deployment + Service)
+- IaC: Terraform (AWS S3 example)
 
-Decisions and notes
-- App: Node.js + Express for small footprint and easy Docker workflow.
-- Metrics: `prom-client` exposes `/metrics` for Prometheus.
-- Dockerfile: multi-stage (builder + runtime) to keep image small.
-- CI: GitHub Actions runs `npm ci`, `npm run lint`, and `docker build` on push.
-- K8s: Manifests are basic and use `simple-node-app:latest`; in production use an image registry and update the image tag.
-- Terraform: sample AWS S3 bucket. Applying requires AWS credentials in your environment.
+## Repository URL
+- Replace with your repo URL:
+  - https://github.com/<your-username>/test_devops_project
 
-How to run locally (recommended)
-1. Install Docker and Node >=16.
-2. Build & run with Docker Compose:
+## Project structure
+- `index.js` — Express app with `/`, `/health`, `/metrics` (exports app for tests)
+- `package.json` — scripts and deps (eslint, test runner)
+- `package-lock.json` — lockfile for reproducible CI (commit this)
+- `.eslintrc.json` — lint rules
+- `Dockerfile` — multi-stage build (small production image)
+- `.dockerignore` — trims Docker build context
+- `docker-compose.yml` — local development
+- `k8s/deployment.yaml`, `k8s/service.yaml` — manifests (probes, replicas)
+- `.github/workflows/ci.yml` — CI/CD (lint, test matrix, build+push to Docker Hub, deploy with kubectl)
+- `terraform/` — S3 bucket sample (`main.tf`, `variables.tf`)
+- `prometheus/prometheus.yml` — local scrape config
 
+## Prerequisites
+- Docker Desktop
+- Node.js 16+ (optional if you only use Docker)
+- kubectl (for Kubernetes)
+- Terraform (for IaC)
+- Docker Hub account (for image publishing)
+
+## Quick start (local)
+
+Run with Docker Compose:
 ```powershell
-# from repository root (Windows PowerShell)
+# from repo root
 docker compose up --build
+# App:     http://localhost:3000
+# Health:  http://localhost:3000/health
+# Metrics: http://localhost:3000/metrics
 ```
 
-3. Visit http://localhost:3000
-4. Metrics are available at http://localhost:3000/metrics for Prometheus to scrape.
+Run with Node (optional):
+```powershell
+npm install
+npm start
+```
 
-CI / GitHub
-- Create a repo on GitHub and push these files.
-- The workflow at `.github/workflows/ci.yml` will run on push to `main`/`master`.
+Lint locally:
+```powershell
+npm run lint
+```
 
-Secrets for Docker Hub
-- The workflow is configured to push images to Docker Hub. Add these repository secrets in GitHub Settings → Secrets:
-	- `DOCKERHUB_USERNAME` — your Docker Hub username
-	- `DOCKERHUB_TOKEN` — a Docker Hub access token (recommended) or your password
+Test locally:
+```powershell
+npm test
+```
 
-You can create an access token in Docker Hub (Account Settings → Security → New Access Token) and paste it into the `DOCKERHUB_TOKEN` secret.
+## CI/CD (GitHub Actions)
 
-Terraform (IaC)
-- To provision the S3 bucket (example):
+Workflow: `.github/workflows/ci.yml`
 
+Triggers:
+- push to main/master, pull_request, and tags `v*.*.*`
+
+Jobs:
+1) Lint (Node 18)
+- `npm ci` with cache, then ESLint with `--max-warnings=0` (warnings fail CI)
+
+2) Test (matrix: Node 16/18/20)
+- `npm ci` with cache, then `npm test` (real endpoint tests)
+
+3) Build & Push (main/tags only)
+- Docker Buildx with GitHub cache layers
+- Login to Docker Hub using repo secrets
+- Push tags:
+  - `docker.io/<DOCKERHUB_USERNAME>/simple-node-app:${GITHUB_SHA}`
+  - `docker.io/<DOCKERHUB_USERNAME>/simple-node-app:latest`
+
+4) Deploy (after push, main/tags)
+- Uses `kubectl` and your kubeconfig to set Deployment image to the SHA tag
+- Waits for rollout to complete
+
+Required repo settings:
+- Secrets:
+  - `DOCKERHUB_USERNAME` — Docker Hub username
+  - `DOCKERHUB_TOKEN` — Docker Hub access token (Docker Hub → Account Settings → Security)
+  - `KUBE_CONFIG` — kubeconfig content (paste YAML content)
+- Variables (optional):
+  - `K8S_NAMESPACE` — target namespace (defaults to `default`)
+
+
+## Kubernetes
+
+Manifests: `k8s/`
+- Deployment `simple-node-app` (2 replicas, readiness/liveness probes)
+- Service `simple-node-app` (ClusterIP port 80 → container 3000)
+
+Image reference in manifest:
+```yaml
+# k8s/deployment.yaml (placeholder; CI overrides during deploy)
+containers:
+  - name: app
+    image: docker.io/<DOCKERHUB_USERNAME>/simple-node-app:latest
+    imagePullPolicy: IfNotPresent
+```
+
+CI deploy step (automatic):
+```bash
+kubectl -n $K8S_NAMESPACE set image deployment/simple-node-app app=docker.io/$DOCKERHUB_USERNAME/simple-node-app:$GITHUB_SHA --record
+kubectl -n $K8S_NAMESPACE rollout status deploy/simple-node-app --timeout=180s
+```
+
+Manual deploy (optional):
+```powershell
+kubectl apply -f k8s/
+```
+
+Private repos: configure an `imagePullSecret` on your ServiceAccount or Pod spec.
+
+## Terraform (IaC)
+
+Creates a versioned S3 bucket (example):
 ```powershell
 cd terraform
 terraform init
 terraform plan -var "bucket_name=your-unique-bucket-name-12345"
 terraform apply -var "bucket_name=your-unique-bucket-name-12345"
 ```
+Requires AWS credentials (AWS CLI profile or env vars).
 
-You must have AWS credentials configured (e.g., `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`).
+## Monitoring
 
-Monitoring plan (basic)
-- Local: run Prometheus using `prometheus.yml` and scrape `host.docker.internal:3000` when using Docker Desktop.
-- Production: run Prometheus + Grafana, scrape the service cluster IP or use ServiceMonitor (Prometheus Operator). Create alerts on `up == 0` for the deployment and on request error rates.
+Prometheus (local) using `prometheus/prometheus.yml`:
+- Scrapes `host.docker.internal:3000/metrics` every 15s (Docker Desktop)
 
-Next steps (practical, prioritized)
+Run Prometheus (optional):
+```powershell
+docker run -p 9090:9090 -v ${PWD}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+```
 
-1) Make CI reproducible and publish images
-	- Commit `package-lock.json` and keep `npm ci` in CI so installs are reproducible.
-	- Add these GitHub Actions secrets:
-	  - `DOCKERHUB_USERNAME` — your Docker Hub username
-	  - `DOCKERHUB_TOKEN` — Docker Hub access token
-	- CI will push images to Docker Hub as:
-	  `docker.io/<DOCKERHUB_USERNAME>/simple-node-app:<sha>` and `:latest`.
+Production recommendations:
+- Prometheus + Grafana (or Prometheus Operator)
+- Alerts: target down (`up == 0`), 5xx rate, latency (e.g., SLO-based)
 
-	 How to create and commit a lockfile (recommended)
+## Development notes
 
-	 If you don't already have `package-lock.json` in the repo, create and commit it so CI's `npm ci` works reproducibly.
+Create and commit lockfile:
+```powershell
+npm install
+git add package-lock.json
+git commit -m "chore: add package-lock.json for reproducible CI installs"
+git push
+```
 
-	 From the project root (PowerShell):
+Node version policy:
+- CI tests on Node 16/18/20. You can set `"engines": { "node": ">=16" }` in `package.json`.
 
-	 ```powershell
-	 # install dependencies and generate package-lock.json without changing node_modules for CI parity
-	 npm install
+## Troubleshooting
+- `npm ci` fails: ensure `package-lock.json` is committed and matches `package.json`.
+- K8s image pull errors: verify Docker Hub path and credentials (if private).
+- Probes failing: ensure `/health` is reachable inside the container and port 3000 is exposed.
+- CI cannot deploy: verify `KUBE_CONFIG` secret content and cluster access/namespace.
 
-	 # add and commit the lockfile
-	 git add package-lock.json
-	 git commit -m "chore: add package-lock.json for reproducible CI installs"
-	 git push origin main
-	 ```
+## Decisions
+- Multi-stage Docker build with small alpine base
+- Non-root container user where practical; probes and resource hygiene in K8s
+- Lint and test before building/pushing images
+- Automated deploy uses immutable SHA tags for safe rollouts
 
-	 Notes:
-	 - `npm ci` will use `package-lock.json` to perform clean, deterministic installs in CI.
-	 - Pin the Node version in `.github/workflows/ci.yml` (the workflow already uses a Node matrix 16/18/20). Consider documenting the supported Node version in `package.json`'s `engines` field.
 
-2) Wire k8s manifests to use the pushed image
-	- Update `k8s/deployment.yaml` image field to reference your Docker Hub image (example):
 
-	  image: docker.io/<your-dockerhub-username>/simple-node-app:latest
-
-	- For immutable deployments, prefer the SHA tag published by CI. Example automation:
-	  - Replace `latest` with the image tag that matches the Git commit SHA or release tag.
-
-3) Enforce quality gates in CI
-	- Lint: ESLint currently fails on warnings (`--max-warnings=0`). Keep or relax as desired.
-	- Tests: replace the placeholder `npm test` with real tests (Jest / Mocha). Add at least one unit test and one small integration test.
-	- Add a security scan (e.g., `npm audit` or a dedicated action) in CI.
-
-4) Release flow and tagging
-	- Use Git tags (vX.Y.Z) to create releases. CI already triggers on tag pushes and will build & push images.
-	- Optionally add a `release` job that creates a GitHub Release and publishes release notes.
-
-5) Monitoring and observability
-	- Run Prometheus + Grafana for production metrics; use the provided `prometheus/prometheus.yml` as a starting point.
-	- Add alerting rules for `up == 0`, increasing 5xx rates, and high latency.
-
-6) Improve IaC
-	- Expand `terraform/` to provision compute (ECS / EKS / GKE) and an Application Load Balancer (or equivalent).
-	- Add CloudWatch (or cloud-native) alarms and a basic IAM policy for automation.
-
-7) Optional: automation and polish
-	- Push images to a registry namespace matching the GitHub repo (e.g., `<username>/<repo>`).
-	- Add image promotion (e.g., tag `latest` only from `main` builds, create staged tags for environments).
-	- Add GitHub Actions to update `k8s/deployment.yaml` automatically or use a deployment tool (ArgoCD / Flux) to sync images.
-
-If you'd like, I can implement any of the above (for example: add a sample Jest test and update `package.json` test script, or update `k8s/deployment.yaml` to use the pushed Docker Hub image automatically). Tell me which one and I'll add it next.
+## License
+- MIT (or your preferred license)
 

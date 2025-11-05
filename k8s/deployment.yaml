@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
         - name: app
-          image: simple-node-app:latest
+          image: docker.io/taherb22/simple-node-app:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
           readinessProbe:
